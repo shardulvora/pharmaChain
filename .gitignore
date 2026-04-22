@@ -1,0 +1,28 @@
+# ── Dependencies ──
+node_modules/
+dist/
+
+# ── Environment ──
+.env
+backend/.env
+blockchain/.env
+
+# ── Python ──
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ── Blockchain artifacts (regenerated on deploy) ──
+blockchain/cache/
+blockchain/artifacts/
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS ──
+.DS_Store
+Thumbs.db

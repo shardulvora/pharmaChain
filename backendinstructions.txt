@@ -1,0 +1,113 @@
+=============================================================
+PILLCHAIN - BACKEND INSTRUCTIONS (FOR THE PYTHON/FASTAPI DEV)
+=============================================================
+
+Hey, since you're building the FastAPI backend, here is exactly what you need to integrate the blockchain data.
+
+-------------------------------------------------------------
+1. THE SETUP & CONNECTION
+-------------------------------------------------------------
+- I (the blockchain guy) will run the local blockchain node 
+  on my machine via "npx hardhat node" which hosts on:
+  http://127.0.0.1:8545
+
+- When I deploy the contract, my script automatically generates 
+  a file called "deployedAddress.json" inside the "blockchain" folder.
+  This file contains the "address" of the contract and the "abi" 
+  (the contract's interface map).
+
+You must configure your web3.py integration to read this file.
+
+Here is the exact Python setup:
+
+```python
+import json
+from web3 import Web3
+
+# Connect to the local Hardhat RPC network
+w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
+
+# Load the contract address and ABI
+with open("../blockchain/deployedAddress.json") as f:
+    contract_data = json.load(f)
+
+# Instantiate the contract
+contract = w3.eth.contract(
+    address=contract_data["address"], 
+    abi=contract_data["abi"]
+)
+```
+
+-------------------------------------------------------------
+2. REQUIRED FASTAPI ENDPOINT
+-------------------------------------------------------------
+You only need to build ONE main endpoint for now to verify batches via the QR code.
+Don't worry about the frontend right now, just make the API work.
+
+Example endpoint: `GET /api/verify/{batch_id}`
+
+Here is how you call the blockchain from inside your endpoint:
+
+```python
+from fastapi import FastAPI, HTTPException
+
+app = FastAPI()
+
+@app.get("/api/verify/{batch_id}")
+async def verify_drug(batch_id: str):
+    try:
+        # Call the view function (Costs NO gas)
+        result = contract.functions.verifyBatch(batch_id).call()
+        
+        # 'result' returns a tuple mapping to the Solidity return types:
+        # 0: bool isAuthentic 
+        # 1: bool isExpired 
+        # 2: bool isRevoked
+        # 3: DrugBatch struct (which is evaluated as a list/tuple in python)
+        
+        isAuthentic = result[0]
+        isExpired = result[1]
+        isRevoked = result[2]
+        batch_struct = result[3]  # [batchId, drugName, manufacturer, expiryDate, registeredBy, ... ]
+        
+        # Format the response clearly for the user
+        if not isAuthentic:
+            return {"status": "FAKE", "message": "Batch ID not found in registry."}
+            
+        if isRevoked:
+            return {"status": "RECALLED", "message": "DANGER: This batch has been recalled by the manufacturer!"}
+            
+        if isExpired:
+            return {"status": "EXPIRED", "message": "WARNING: This drug has passed its expiration date."}
+            
+        # If it passes all checks, it's authentic and safe
+        return {
+            "status": "AUTHENTIC",
+            "message": "Drug verified against the blockchain.",
+            "data": {
+                "batchId": batch_struct[0],
+                "drugName": batch_struct[1],
+                "manufacturer": batch_struct[2],
+                "expiryDate": batch_struct[3] # This is a Unix timestamp!
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+-------------------------------------------------------------
+3. THE TEST DATA (SEEDED BATCHES)
+-------------------------------------------------------------
+When I run my deploy script, it automatically inserts 3 authentic 
+batches for us to test with. You can test your FastAPI endpoints 
+by curling/requesting these batch IDs:
+
+1. "BATCH001" (Paracetamol 500mg, Sun Pharma)
+2. "BATCH002" (Amoxicillin 250mg, Cipla Ltd)
+3. "BATCH003" (Metformin 500mg, Dr. Reddys)
+
+If you query anything else, like "BATCH999", the `isAuthentic` 
+flag should return `False` (which means it's a fake drug).
+
+Let me know if you need any other smart contract functions created!
