@@ -135,6 +135,10 @@ def _validate_batch_id(batch_id: str) -> None:
         )
 
 
+def _normalize_batch_id(batch_id: str) -> str:
+    return batch_id.strip().upper()
+
+
 def _parse_batch(batch_tuple: tuple) -> BatchData:
     expiry = int(batch_tuple[3])
     return BatchData(
@@ -176,10 +180,11 @@ async def health() -> dict[str, str]:
 
 @app.get("/api/verify/{batch_id}", response_model=VerifyResponse)
 async def verify_drug(batch_id: str) -> VerifyResponse:
-    _validate_batch_id(batch_id)
+    normalized_batch_id = _normalize_batch_id(batch_id)
+    _validate_batch_id(normalized_batch_id)
     try:
         _, contract = _load_contract()
-        result = contract.functions.verifyBatch(batch_id).call()
+        result = contract.functions.verifyBatch(normalized_batch_id).call()
 
         is_authentic = bool(result[0])
         is_expired = bool(result[1])
@@ -187,7 +192,7 @@ async def verify_drug(batch_id: str) -> VerifyResponse:
         batch_data = _parse_batch(result[3])
 
         if not is_authentic:
-            logger.info("Batch %s: NOT FOUND (FAKE)", batch_id)
+            logger.info("Batch %s: NOT FOUND (FAKE)", normalized_batch_id)
             return VerifyResponse(
                 status="FAKE",
                 message="Batch ID not found in registry.",
@@ -195,7 +200,7 @@ async def verify_drug(batch_id: str) -> VerifyResponse:
             )
 
         if is_revoked:
-            logger.warning("Batch %s: RECALLED", batch_id)
+            logger.warning("Batch %s: RECALLED", normalized_batch_id)
             return VerifyResponse(
                 status="RECALLED",
                 message="DANGER: This batch has been recalled by the manufacturer!",
@@ -203,14 +208,14 @@ async def verify_drug(batch_id: str) -> VerifyResponse:
             )
 
         if is_expired:
-            logger.warning("Batch %s: EXPIRED", batch_id)
+            logger.warning("Batch %s: EXPIRED", normalized_batch_id)
             return VerifyResponse(
                 status="EXPIRED",
                 message="WARNING: This drug has passed its expiration date.",
                 data=batch_data,
             )
 
-        logger.info("Batch %s: AUTHENTIC ✓", batch_id)
+        logger.info("Batch %s: AUTHENTIC ✓", normalized_batch_id)
         return VerifyResponse(
             status="AUTHENTIC",
             message="Drug verified against the blockchain.",
@@ -219,7 +224,7 @@ async def verify_drug(batch_id: str) -> VerifyResponse:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("verify_drug failed for %s: %s", batch_id, exc)
+        logger.error("verify_drug failed for %s: %s", normalized_batch_id, exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -10,42 +10,109 @@ interface Props {
 
 export default function QRScanner({ open, onClose, onScan }: Props) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const isMountedRef = useRef(true);
+  const isStoppingRef = useRef(false);
+  const lastScannedRef = useRef("");
+  const isProcessingScanRef = useRef(false);
+
+  // Stable refs for callbacks to avoid useEffect re-runs
+  const onScanRef = useRef(onScan);
+  const onCloseRef = useRef(onClose);
+  onScanRef.current = onScan;
+  onCloseRef.current = onClose;
+
+  const stopScanner = useCallback(async () => {
+    if (isStoppingRef.current) return;
+    isStoppingRef.current = true;
+
+    try {
+      const scanner = scannerRef.current;
+      if (scanner) {
+        const state = scanner.getState();
+        // Only stop if it's actually scanning (state 2 = SCANNING)
+        if (state === 2) {
+          await scanner.stop();
+        }
+        scannerRef.current = null;
+      }
+    } catch {
+      // Ignore stop errors — scanner may already be stopped
+    } finally {
+      isStoppingRef.current = false;
+    }
+  }, []);
 
   useEffect(() => {
+    isMountedRef.current = true;
+    lastScannedRef.current = "";
+    isProcessingScanRef.current = false;
+
     if (!open) return;
 
     const scannerId = "qr-reader";
 
-    // Small delay to let the DOM render the container
     const timeout = setTimeout(async () => {
+      // Bail if component already unmounted
+      if (!isMountedRef.current) return;
+
       try {
+        const container = document.getElementById(scannerId);
+        if (container) {
+          container.innerHTML = "";
+        }
+
         const scanner = new Html5Qrcode(scannerId);
         scannerRef.current = scanner;
 
         await scanner.start(
           { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          (decodedText) => {
-            onScan(decodedText);
-            scanner.stop().catch(() => {});
-            onClose();
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1,
           },
-          () => {} // ignore scan errors (no QR in frame)
+          (decodedText) => {
+            const normalized = decodedText.trim();
+            if (!normalized) return;
+
+            // Avoid duplicate scans of the same QR while scanner is open.
+            if (normalized === lastScannedRef.current) return;
+
+            // Prevent request storms while verification is in-flight.
+            if (isProcessingScanRef.current) return;
+
+            lastScannedRef.current = normalized;
+            isProcessingScanRef.current = true;
+
+            try {
+              onScanRef.current(normalized);
+            } finally {
+              window.setTimeout(() => {
+                isProcessingScanRef.current = false;
+              }, 700);
+            }
+          },
+          () => {
+            // No QR found in frame — ignore
+          }
         );
       } catch (err) {
         console.error("QR Scanner failed to start:", err);
       }
-    }, 300);
+    }, 400);
 
     return () => {
+      isMountedRef.current = false;
       clearTimeout(timeout);
-      if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {});
-        scannerRef.current = null;
-      }
+      stopScanner();
     };
-  }, [open, onScan, onClose]);
+  }, [open, stopScanner]);
+
+  const handleClose = useCallback(() => {
+    stopScanner().then(() => {
+      onCloseRef.current();
+    });
+  }, [stopScanner]);
 
   return (
     <AnimatePresence>
@@ -58,7 +125,7 @@ export default function QRScanner({ open, onClose, onScan }: Props) {
           transition={{ duration: 0.2 }}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
-              onClose();
+              handleClose();
             }
           }}
         >
@@ -69,12 +136,15 @@ export default function QRScanner({ open, onClose, onScan }: Props) {
             exit={{ scale: 0.9, opacity: 0 }}
             transition={{ type: "spring", stiffness: 400, damping: 28 }}
           >
-            <button className="qr-scanner-close" onClick={onClose}>
+            <button className="qr-scanner-close" onClick={handleClose}>
               ✕
             </button>
             <h2>📷 Scan QR Code</h2>
-            <p>Point your camera at the QR code on the medicine packaging.</p>
-            <div className="qr-reader-container" ref={containerRef}>
+            <p>
+              Point your camera at the QR code on the medicine packaging. The scanner
+              stays open so you can verify multiple batch IDs.
+            </p>
+            <div className="qr-reader-container">
               <div id="qr-reader" />
             </div>
           </motion.div>

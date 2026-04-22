@@ -5,6 +5,37 @@ import { addToHistory, getHistory, clearHistory, formatTimeAgo, type HistoryEntr
 import StatusBadge from "../components/StatusBadge";
 import QRScanner from "../components/QRScanner";
 
+/**
+ * Extract a batch ID from a scanned QR value.
+ * Handles plain text ("BATCH001"), full URLs ("https://example.com/batch/BATCH001"),
+ * or any other format by taking the last path segment.
+ */
+function extractBatchId(raw: string): string {
+  const trimmed = raw.trim();
+  const normalize = (value: string) => value.trim().toUpperCase();
+
+  const safeDecode = (value: string) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+
+  // If it looks like a URL, extract the last path segment
+  try {
+    const url = new URL(trimmed);
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length > 0) {
+      return normalize(safeDecode(segments[segments.length - 1]));
+    }
+  } catch {
+    // Not a URL — use as-is
+  }
+
+  return normalize(safeDecode(trimmed));
+}
+
 export default function HomePage() {
   const [batchId, setBatchId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -14,17 +45,19 @@ export default function HomePage() {
   const [history, setHistory] = useState<HistoryEntry[]>(getHistory);
 
   const doVerify = useCallback(async (id: string) => {
-    if (!id.trim()) return;
+    const normalizedId = extractBatchId(id);
+    if (!normalizedId) return;
+
     setLoading(true);
     setError("");
     setResult(null);
 
     try {
-      const data = await verifyBatch(id.trim());
+      const data = await verifyBatch(normalizedId);
       setResult(data);
 
       addToHistory({
-        batchId: data.data.batchId || id.trim(),
+        batchId: data.data.batchId || normalizedId,
         drugName: data.data.drugName || "Unknown",
         status: data.status,
       });
@@ -42,8 +75,12 @@ export default function HomePage() {
   }
 
   function onScan(scannedValue: string) {
-    setBatchId(scannedValue);
-    doVerify(scannedValue);
+    const extracted = extractBatchId(scannedValue);
+    setBatchId(extracted);
+    // Use setTimeout to let React finish state updates before triggering fetch
+    setTimeout(() => {
+      doVerify(extracted);
+    }, 100);
   }
 
   function onHistoryClear() {
@@ -210,7 +247,13 @@ export default function HomePage() {
         )}
       </div>
 
-      <QRScanner open={scannerOpen} onClose={() => setScannerOpen(false)} onScan={onScan} />
+      {scannerOpen && (
+        <QRScanner
+          open={scannerOpen}
+          onClose={() => setScannerOpen(false)}
+          onScan={onScan}
+        />
+      )}
     </>
   );
 }

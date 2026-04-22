@@ -15,7 +15,23 @@ export default function BatchDetailPage() {
     setLoading(true);
     setError("");
 
-    verifyBatch(decodeURIComponent(id))
+    let decodedId = id;
+    try {
+      decodedId = decodeURIComponent(id);
+    } catch {
+      setError("Invalid batch ID format in URL");
+      setLoading(false);
+      return;
+    }
+
+    const normalizedId = decodedId.trim().toUpperCase();
+    if (!normalizedId) {
+      setError("Batch ID is required");
+      setLoading(false);
+      return;
+    }
+
+    verifyBatch(normalizedId)
       .then(setResult)
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Verification failed")

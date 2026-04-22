@@ -8,8 +8,10 @@ export default function GeneratePage() {
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
 
   function onGenerate() {
-    if (!batchId.trim()) return;
-    setGenerated(batchId.trim());
+    const normalizedBatchId = batchId.trim().toUpperCase();
+    if (!normalizedBatchId) return;
+    setGenerated(normalizedBatchId);
+    setBatchId(normalizedBatchId);
   }
 
   const onDownload = useCallback(() => {
@@ -33,8 +35,8 @@ export default function GeneratePage() {
         <p className="section-eyebrow">For Manufacturers</p>
         <h1 className="section-title">QR Code Generator</h1>
         <p className="section-subtitle">
-          Generate a QR code for any batch ID. Print it on the medicine packaging
-          so users can scan and verify.
+          Generate a QR code label for an existing batch ID. This only creates a QR
+          image for packaging — it does not register/seed the batch on blockchain.
         </p>
       </motion.div>
 

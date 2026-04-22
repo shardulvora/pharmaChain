@@ -33,8 +33,13 @@ export interface StatsResponse {
 }
 
 export async function verifyBatch(batchId: string): Promise<VerifyResponse> {
+  const normalizedBatchId = batchId.trim().toUpperCase();
+  if (!normalizedBatchId) {
+    throw new Error("Batch ID is required");
+  }
+
   const res = await fetch(
-    `${API_BASE_URL}/api/verify/${encodeURIComponent(batchId.trim())}`
+    `${API_BASE_URL}/api/verify/${encodeURIComponent(normalizedBatchId)}`
   );
   if (!res.ok) {
     const detail = await res.text();

@@ -45,6 +45,66 @@ async function main() {
       manufacturer: "Dr. Reddys",
       expiryDate: expiryOneYear,
     },
+    {
+      batchId: "BATCH004",
+      drugName: "Ibuprofen 400mg",
+      manufacturer: "Abbott India",
+      expiryDate: expiryOneYear,
+    },
+    {
+      batchId: "BATCH005",
+      drugName: "Atorvastatin 10mg",
+      manufacturer: "Lupin Ltd",
+      expiryDate: expiryOneYear,
+    },
+    {
+      batchId: "BATCH006",
+      drugName: "Omeprazole 20mg",
+      manufacturer: "Torrent Pharma",
+      expiryDate: expiryOneYear,
+    },
+    {
+      batchId: "BATCH007",
+      drugName: "Azithromycin 500mg",
+      manufacturer: "Macleods Pharma",
+      expiryDate: expiryOneYear,
+    },
+    {
+      batchId: "BATCH008",
+      drugName: "Pantoprazole 40mg",
+      manufacturer: "Alkem Laboratories",
+      expiryDate: expiryOneYear,
+    },
+    {
+      batchId: "BATCH009",
+      drugName: "Cetirizine 10mg",
+      manufacturer: "Zydus Lifesciences",
+      expiryDate: expiryOneYear,
+    },
+    {
+      batchId: "BATCH010",
+      drugName: "Amlodipine 5mg",
+      manufacturer: "Glenmark Pharmaceuticals",
+      expiryDate: expiryOneYear,
+    },
+    {
+      batchId: "BATCH011",
+      drugName: "Levothyroxine 50mcg",
+      manufacturer: "GSK India",
+      expiryDate: expiryOneYear,
+    },
+    {
+      batchId: "BATCH012",
+      drugName: "Losartan 50mg",
+      manufacturer: "Intas Pharmaceuticals",
+      expiryDate: expiryOneYear,
+    },
+    {
+      batchId: "BATCH013",
+      drugName: "Diclofenac 50mg",
+      manufacturer: "Novartis India",
+      expiryDate: expiryOneYear,
+    },
   ];
 
   // Connect contract as manufacturer to register batches

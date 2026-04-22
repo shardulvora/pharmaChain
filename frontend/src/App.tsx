@@ -5,6 +5,7 @@ import DashboardPage from "./pages/DashboardPage";
 import BatchDetailPage from "./pages/BatchDetailPage";
 import GeneratePage from "./pages/GeneratePage";
 import AboutPage from "./pages/AboutPage";
+import VerifyPage from "./pages/VerifyPage";
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
       <main className="page-content">
         <Routes>
           <Route path="/" element={<HomePage />} />
+          <Route path="/verify" element={<VerifyPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/batch/:id" element={<BatchDetailPage />} />
           <Route path="/generate" element={<GeneratePage />} />
