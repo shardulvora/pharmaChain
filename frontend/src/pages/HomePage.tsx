@@ -1,259 +1,166 @@
-import { FormEvent, useCallback, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { verifyBatch, type VerifyResponse } from "../lib/api";
-import { addToHistory, getHistory, clearHistory, formatTimeAgo, type HistoryEntry } from "../lib/history";
-import StatusBadge from "../components/StatusBadge";
-import QRScanner from "../components/QRScanner";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { motion } from "framer-motion";
+import { getStats, type StatsResponse } from "../lib/api";
 
-/**
- * Extract a batch ID from a scanned QR value.
- * Handles plain text ("BATCH001"), full URLs ("https://example.com/batch/BATCH001"),
- * or any other format by taking the last path segment.
- */
-function extractBatchId(raw: string): string {
-  const trimmed = raw.trim();
-  const normalize = (value: string) => value.trim().toUpperCase();
+const features = [
+  {
+    icon: "🔗",
+    title: "On-Chain Provenance",
+    desc: "Every batch is immutably registered on Ethereum. Blockchain records cannot be altered, forged, or deleted.",
+  },
+  {
+    icon: "🧠",
+    title: "AI Risk Insights",
+    desc: "Our AI engine analyses scan velocity, geolocation patterns, and supply-chain gaps to surface counterfeit signals instantly.",
+  },
+  {
+    icon: "🌍",
+    title: "Geo Anomaly Detection",
+    desc: "Real-time detection of physically impossible distribution patterns — catch QR duplication attacks before harm is done.",
+  },
+  {
+    icon: "🔒",
+    title: "Full Chain-of-Custody",
+    desc: "Track a drug from Manufacturer → Distributor → Logistics → Pharmacy, with every handoff timestamped on-chain.",
+  },
+  {
+    icon: "📊",
+    title: "Supply Chain Dashboard",
+    desc: "Monitor all registered batches, authentic vs recalled counts, and flag suspicious activity in real time.",
+  },
+  {
+    icon: "📱",
+    title: "QR Code Verification",
+    desc: "Scan a package QR with any camera. No app install required — verification happens in your browser in seconds.",
+  },
+];
 
-  const safeDecode = (value: string) => {
-    try {
-      return decodeURIComponent(value);
-    } catch {
-      return value;
-    }
-  };
-
-  // If it looks like a URL, extract the last path segment
-  try {
-    const url = new URL(trimmed);
-    const segments = url.pathname.split("/").filter(Boolean);
-    if (segments.length > 0) {
-      return normalize(safeDecode(segments[segments.length - 1]));
-    }
-  } catch {
-    // Not a URL — use as-is
-  }
-
-  return normalize(safeDecode(trimmed));
-}
+const statLabels: Record<string, string> = {
+  totalBatches: "Batches Registered",
+  authenticCount: "Authentic",
+  expiredCount: "Expired",
+  revokedCount: "Recalled",
+};
 
 export default function HomePage() {
-  const [batchId, setBatchId] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [result, setResult] = useState<VerifyResponse | null>(null);
-  const [scannerOpen, setScannerOpen] = useState(false);
-  const [history, setHistory] = useState<HistoryEntry[]>(getHistory);
+  const [stats, setStats] = useState<StatsResponse | null>(null);
 
-  const doVerify = useCallback(async (id: string) => {
-    const normalizedId = extractBatchId(id);
-    if (!normalizedId) return;
-
-    setLoading(true);
-    setError("");
-    setResult(null);
-
-    try {
-      const data = await verifyBatch(normalizedId);
-      setResult(data);
-
-      addToHistory({
-        batchId: data.data.batchId || normalizedId,
-        drugName: data.data.drugName || "Unknown",
-        status: data.status,
-      });
-      setHistory(getHistory());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to verify batch");
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    getStats()
+      .then(setStats)
+      .catch(() => {/* Non-critical — hide stats strip silently */});
   }, []);
 
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    doVerify(batchId);
-  }
-
-  function onScan(scannedValue: string) {
-    const extracted = extractBatchId(scannedValue);
-    setBatchId(extracted);
-    // Use setTimeout to let React finish state updates before triggering fetch
-    setTimeout(() => {
-      doVerify(extracted);
-    }, 100);
-  }
-
-  function onHistoryClear() {
-    clearHistory();
-    setHistory([]);
-  }
-
-  function onHistoryClick(entry: HistoryEntry) {
-    setBatchId(entry.batchId);
-    doVerify(entry.batchId);
-  }
-
-  const statusIcon: Record<string, string> = {
-    AUTHENTIC: "✅",
-    EXPIRED: "⏱️",
-    RECALLED: "🚨",
-    FAKE: "❌",
-  };
-
   return (
-    <>
-      <div className="home-hero">
-        <p className="section-eyebrow">Blockchain-Verified</p>
-        <h1 className="section-title">Drug Batch Verification</h1>
-        <p className="section-subtitle">
-          Enter a batch ID or scan the QR code on your medicine to verify its authenticity
-          against the blockchain.
+    <div className="home-page">
+
+      {/* ── Hero ────────────────────────────────────────────── */}
+      <motion.section
+        className="hero-section"
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <div className="hero-glow" />
+
+        <p className="hero-eyebrow">Blockchain-Powered · AI-Enhanced</p>
+
+        <h1 className="hero-title">
+          Stop Counterfeit Drugs<br />
+          <span className="hero-title-accent">Before They Reach Patients</span>
+        </h1>
+
+        <p className="hero-subtitle">
+          PillChain verifies pharmaceutical authenticity in seconds using on-chain
+          provenance records and AI-driven risk analysis. Scan a QR code, get the truth.
         </p>
-      </div>
 
-      <div className="verify-form-wrapper">
-        <form className="verify-form" onSubmit={onSubmit}>
-          <input
-            id="batch-input"
-            className="input"
-            placeholder="e.g. BATCH001"
-            value={batchId}
-            onChange={(e) => setBatchId(e.target.value)}
-            autoComplete="off"
-          />
-          <button
-            id="verify-btn"
-            className="btn btn-primary"
-            type="submit"
-            disabled={loading || !batchId.trim()}
-          >
-            {loading ? (
-              <>
-                <span className="spinner" /> Verifying…
-              </>
-            ) : (
-              "🔍 Verify"
-            )}
-          </button>
-          <button
-            id="scan-btn"
-            className="btn btn-secondary scan-btn"
-            type="button"
-            onClick={() => setScannerOpen(true)}
-          >
-            📷 Scan
-          </button>
-        </form>
+        <div className="hero-actions">
+          <Link to="/verify" className="hero-cta-primary">
+            🔍 Verify a Drug Now
+          </Link>
+          <Link to="/dashboard" className="hero-cta-secondary">
+            📊 View Dashboard
+          </Link>
+        </div>
+      </motion.section>
 
-        <AnimatePresence>
-          {error && (
-            <motion.div
-              className="error-message"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-            >
-              {error}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <AnimatePresence>
-          {result && (
-            <motion.div
-              className="verify-result"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 16 }}
-              transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-            >
-              <div className="verify-result-header">
-                <div className={`verify-result-icon ${result.status.toLowerCase()}`}>
-                  {statusIcon[result.status] ?? "❓"}
-                </div>
-                <div>
-                  <StatusBadge status={result.status} />
-                  <p className="verify-result-message">{result.message}</p>
-                </div>
-              </div>
-
-              <div className="verify-result-details">
-                <div className="detail-item">
-                  <div className="detail-label">Batch ID</div>
-                  <div className="detail-value">{result.data.batchId || "—"}</div>
-                </div>
-                <div className="detail-item">
-                  <div className="detail-label">Drug Name</div>
-                  <div className="detail-value">{result.data.drugName || "—"}</div>
-                </div>
-                <div className="detail-item">
-                  <div className="detail-label">Manufacturer</div>
-                  <div className="detail-value">{result.data.manufacturer || "—"}</div>
-                </div>
-                <div className="detail-item">
-                  <div className="detail-label">Expiry Date</div>
-                  <div className="detail-value">
-                    {result.data.expiryDate
-                      ? new Date(result.data.expiryDate * 1000).toLocaleDateString(
-                          undefined,
-                          { year: "numeric", month: "long", day: "numeric" }
-                        )
-                      : "—"}
-                  </div>
-                </div>
-                <div className="detail-item">
-                  <div className="detail-label">Registered By</div>
-                  <div className="detail-value" style={{ fontSize: "0.75rem" }}>
-                    {result.data.registeredBy || "—"}
-                  </div>
-                </div>
-                <div className="detail-item">
-                  <div className="detail-label">On-Chain Status</div>
-                  <div className="detail-value">
-                    {result.data.exists ? "✓ Registered" : "✗ Not Found"}
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Verification History */}
-        {history.length > 0 && (
-          <div className="history-section">
-            <h3>
-              🕓 Recent Verifications
-              <button className="history-clear-btn" onClick={onHistoryClear}>
-                Clear
-              </button>
-            </h3>
-            <div className="history-list">
-              {history.map((entry) => (
-                <div
-                  key={entry.batchId + entry.timestamp}
-                  className="history-item"
-                  onClick={() => onHistoryClick(entry)}
-                >
-                  <div className="history-item-left">
-                    <span>{statusIcon[entry.status] ?? "❓"}</span>
-                    <span className="history-batch-id">{entry.batchId}</span>
-                    <span className="history-drug-name">{entry.drugName}</span>
-                  </div>
-                  <span className="history-time">{formatTimeAgo(entry.timestamp)}</span>
-                </div>
-              ))}
+      {/* ── Live Stats Strip ─────────────────────────────────── */}
+      {stats && (
+        <motion.div
+          className="stats-strip"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.25 }}
+        >
+          {(
+            [
+              ["totalBatches", stats.totalBatches],
+              ["authenticCount", stats.authenticCount],
+              ["expiredCount", stats.expiredCount],
+              ["revokedCount", stats.revokedCount],
+            ] as [string, number][]
+          ).map(([key, value]) => (
+            <div key={key} className="stats-strip-item">
+              <span className="stats-strip-value">{value.toLocaleString()}</span>
+              <span className="stats-strip-label">{statLabels[key]}</span>
             </div>
-          </div>
-        )}
-      </div>
-
-      {scannerOpen && (
-        <QRScanner
-          open={scannerOpen}
-          onClose={() => setScannerOpen(false)}
-          onScan={onScan}
-        />
+          ))}
+        </motion.div>
       )}
-    </>
+
+      {/* ── Feature Grid ─────────────────────────────────────── */}
+      <motion.section
+        className="features-section"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4, delay: 0.35 }}
+      >
+        <p className="features-eyebrow">Why PillChain</p>
+        <h2 className="features-heading">Built for trust. Designed for speed.</h2>
+
+        <div className="features-grid">
+          {features.map((f, i) => (
+            <motion.div
+              key={f.title}
+              className="feature-card"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.1 * i + 0.4 }}
+              whileHover={{ y: -4, transition: { duration: 0.2 } }}
+            >
+              <div className="feature-icon">{f.icon}</div>
+              <h3 className="feature-title">{f.title}</h3>
+              <p className="feature-desc">{f.desc}</p>
+            </motion.div>
+          ))}
+        </div>
+      </motion.section>
+
+      {/* ── Final CTA ────────────────────────────────────────── */}
+      <motion.section
+        className="home-cta-section"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, delay: 0.65 }}
+      >
+        <div className="home-cta-card">
+          <div className="home-cta-glow" />
+          <p className="hero-eyebrow">Ready to verify?</p>
+          <h2 className="home-cta-heading">
+            One batch ID. Instant blockchain proof.
+          </h2>
+          <p className="home-cta-sub">
+            Scan a QR code or enter a batch ID to verify authenticity, check recall
+            status, and get a full AI risk assessment — in under 5 seconds.
+          </p>
+          <Link to="/verify" className="hero-cta-primary" style={{ display: "inline-flex" }}>
+            🔍 Open Verification Vault →
+          </Link>
+        </div>
+      </motion.section>
+
+    </div>
   );
 }

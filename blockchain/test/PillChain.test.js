@@ -9,6 +9,10 @@ describe("PillChain", function () {
   const ONE_YEAR = 365 * 24 * 60 * 60;
   let futureExpiry;
 
+  // DID identity for manufacturer
+  const MFG_NAME = "Sun Pharma Ltd";
+  const MFG_LICENSE = "MFG-IN-2024-001";
+
   beforeEach(async function () {
     [owner, manufacturer, manufacturer2, unauthorized] = await hre.ethers.getSigners();
 
@@ -21,33 +25,59 @@ describe("PillChain", function () {
     futureExpiry = block.timestamp + ONE_YEAR;
   });
 
-  // ── Authorization Tests ───────────────────────────────────
+  // ── Authorization / DID Tests ─────────────────────────────
 
-  it("Owner can authorize a manufacturer", async function () {
-    await pillchain.authorizeManufacturer(manufacturer.address);
-    expect(await pillchain.authorizedManufacturers(manufacturer.address)).to.be
-      .true;
+  it("Owner can authorize a manufacturer with name and licenseId", async function () {
+    await pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE);
+
+    const [name, licenseId, isVerified] = await pillchain.getManufacturer(manufacturer.address);
+    expect(name).to.equal(MFG_NAME);
+    expect(licenseId).to.equal(MFG_LICENSE);
+    expect(isVerified).to.be.true;
   });
 
-  it("Owner can revoke a manufacturer", async function () {
-    await pillchain.authorizeManufacturer(manufacturer.address);
-    expect(await pillchain.authorizedManufacturers(manufacturer.address)).to.be.true;
+  it("Owner can revoke a manufacturer (isVerified becomes false, identity preserved)", async function () {
+    await pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE);
 
     await pillchain.revokeManufacturer(manufacturer.address);
-    expect(await pillchain.authorizedManufacturers(manufacturer.address)).to.be.false;
+
+    const [name, licenseId, isVerified] = await pillchain.getManufacturer(manufacturer.address);
+    // Name and licenseId are preserved for audit trail
+    expect(name).to.equal(MFG_NAME);
+    expect(licenseId).to.equal(MFG_LICENSE);
+    expect(isVerified).to.be.false;
   });
 
   it("Non-owner cannot authorize a manufacturer", async function () {
     await expect(
-      pillchain.connect(unauthorized).authorizeManufacturer(manufacturer.address)
+      pillchain.connect(unauthorized).authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE)
     ).to.be.revertedWith("PillChain: caller is not owner");
   });
 
   it("Non-owner cannot revoke a manufacturer", async function () {
-    await pillchain.authorizeManufacturer(manufacturer.address);
+    await pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE);
     await expect(
       pillchain.connect(unauthorized).revokeManufacturer(manufacturer.address)
     ).to.be.revertedWith("PillChain: caller is not owner");
+  });
+
+  it("authorizeManufacturer rejects empty name", async function () {
+    await expect(
+      pillchain.authorizeManufacturer(manufacturer.address, "", MFG_LICENSE)
+    ).to.be.revertedWith("PillChain: name cannot be empty");
+  });
+
+  it("authorizeManufacturer rejects empty licenseId", async function () {
+    await expect(
+      pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, "")
+    ).to.be.revertedWith("PillChain: licenseId cannot be empty");
+  });
+
+  it("getManufacturer returns empty for unknown address", async function () {
+    const [name, licenseId, isVerified] = await pillchain.getManufacturer(unauthorized.address);
+    expect(name).to.equal("");
+    expect(licenseId).to.equal("");
+    expect(isVerified).to.be.false;
   });
 
   // ── Ownership Tests ───────────────────────────────────────
@@ -72,11 +102,11 @@ describe("PillChain", function () {
   // ── Batch Registration Tests ──────────────────────────────
 
   it("Authorized manufacturer can register a batch", async function () {
-    await pillchain.authorizeManufacturer(manufacturer.address);
+    await pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE);
 
     await pillchain
       .connect(manufacturer)
-      .registerBatch("BATCH001", "Paracetamol 500mg", "Sun Pharma", futureExpiry);
+      .registerBatch("BATCH001", "Paracetamol 500mg", MFG_NAME, futureExpiry);
 
     const [isAuthentic] = await pillchain.verifyBatch("BATCH001");
     expect(isAuthentic).to.be.true;
@@ -91,11 +121,11 @@ describe("PillChain", function () {
   });
 
   it("Duplicate batchId registration reverts", async function () {
-    await pillchain.authorizeManufacturer(manufacturer.address);
+    await pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE);
 
     await pillchain
       .connect(manufacturer)
-      .registerBatch("BATCH001", "Paracetamol 500mg", "Sun Pharma", futureExpiry);
+      .registerBatch("BATCH001", "Paracetamol 500mg", MFG_NAME, futureExpiry);
 
     await expect(
       pillchain
@@ -104,14 +134,25 @@ describe("PillChain", function () {
     ).to.be.revertedWith("PillChain: batch already exists");
   });
 
+  it("Revoked manufacturer cannot register new batches", async function () {
+    await pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE);
+    await pillchain.revokeManufacturer(manufacturer.address);
+
+    await expect(
+      pillchain
+        .connect(manufacturer)
+        .registerBatch("BATCH999", "SomeDrug", MFG_NAME, futureExpiry)
+    ).to.be.revertedWith("PillChain: caller is not an authorized manufacturer");
+  });
+
   // ── Verification Tests ────────────────────────────────────
 
   it("verifyBatch returns isAuthentic=true for a registered batch", async function () {
-    await pillchain.authorizeManufacturer(manufacturer.address);
+    await pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE);
 
     await pillchain
       .connect(manufacturer)
-      .registerBatch("BATCH001", "Paracetamol 500mg", "Sun Pharma", futureExpiry);
+      .registerBatch("BATCH001", "Paracetamol 500mg", MFG_NAME, futureExpiry);
 
     const [isAuthentic, isExpired, isRevoked, batch] =
       await pillchain.verifyBatch("BATCH001");
@@ -120,7 +161,8 @@ describe("PillChain", function () {
     expect(isExpired).to.be.false;
     expect(isRevoked).to.be.false;
     expect(batch.drugName).to.equal("Paracetamol 500mg");
-    expect(batch.manufacturer).to.equal("Sun Pharma");
+    expect(batch.manufacturer).to.equal(MFG_NAME);
+    expect(batch.registeredBy).to.equal(manufacturer.address);
   });
 
   it("verifyBatch returns isAuthentic=false for unknown batchId", async function () {
@@ -131,11 +173,11 @@ describe("PillChain", function () {
   // ── Revoke Tests ──────────────────────────────────────────
 
   it("Batch registerer can revoke their own batch", async function () {
-    await pillchain.authorizeManufacturer(manufacturer.address);
+    await pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE);
 
     await pillchain
       .connect(manufacturer)
-      .registerBatch("BATCH001", "Paracetamol 500mg", "Sun Pharma", futureExpiry);
+      .registerBatch("BATCH001", "Paracetamol 500mg", MFG_NAME, futureExpiry);
 
     await pillchain.connect(manufacturer).revokeBatch("BATCH001");
 
@@ -145,12 +187,12 @@ describe("PillChain", function () {
   });
 
   it("Different manufacturer cannot revoke another's batch", async function () {
-    await pillchain.authorizeManufacturer(manufacturer.address);
-    await pillchain.authorizeManufacturer(manufacturer2.address);
+    await pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE);
+    await pillchain.authorizeManufacturer(manufacturer2.address, "Cipla Ltd", "MFG-IN-2024-002");
 
     await pillchain
       .connect(manufacturer)
-      .registerBatch("BATCH001", "Paracetamol 500mg", "Sun Pharma", futureExpiry);
+      .registerBatch("BATCH001", "Paracetamol 500mg", MFG_NAME, futureExpiry);
 
     await expect(
       pillchain.connect(manufacturer2).revokeBatch("BATCH001")
@@ -162,11 +204,11 @@ describe("PillChain", function () {
   it("getBatchCount returns correct count", async function () {
     expect(await pillchain.getBatchCount()).to.equal(0);
 
-    await pillchain.authorizeManufacturer(manufacturer.address);
+    await pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE);
 
     await pillchain
       .connect(manufacturer)
-      .registerBatch("BATCH001", "Paracetamol 500mg", "Sun Pharma", futureExpiry);
+      .registerBatch("BATCH001", "Paracetamol 500mg", MFG_NAME, futureExpiry);
 
     expect(await pillchain.getBatchCount()).to.equal(1);
 
@@ -178,11 +220,11 @@ describe("PillChain", function () {
   });
 
   it("getBatchIdAtIndex returns correct batch IDs", async function () {
-    await pillchain.authorizeManufacturer(manufacturer.address);
+    await pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE);
 
     await pillchain
       .connect(manufacturer)
-      .registerBatch("BATCH001", "Paracetamol 500mg", "Sun Pharma", futureExpiry);
+      .registerBatch("BATCH001", "Paracetamol 500mg", MFG_NAME, futureExpiry);
     await pillchain
       .connect(manufacturer)
       .registerBatch("BATCH002", "Amoxicillin 250mg", "Cipla Ltd", futureExpiry);
@@ -198,11 +240,11 @@ describe("PillChain", function () {
   });
 
   it("getAllBatchIds returns full array", async function () {
-    await pillchain.authorizeManufacturer(manufacturer.address);
+    await pillchain.authorizeManufacturer(manufacturer.address, MFG_NAME, MFG_LICENSE);
 
     await pillchain
       .connect(manufacturer)
-      .registerBatch("BATCH001", "Paracetamol 500mg", "Sun Pharma", futureExpiry);
+      .registerBatch("BATCH001", "Paracetamol 500mg", MFG_NAME, futureExpiry);
     await pillchain
       .connect(manufacturer)
       .registerBatch("BATCH002", "Amoxicillin 250mg", "Cipla Ltd", futureExpiry);

@@ -6,6 +6,10 @@ pragma solidity ^0.8.20;
  * @notice Fake drug detection & pharmaceutical supply chain verification.
  *         Manufacturers register drug batches on-chain; anyone can verify
  *         authenticity by batch ID.
+ *
+ *         DID extension: each authorized manufacturer now carries a real-world
+ *         name and a regulatory license ID stored on-chain, giving human-readable
+ *         identity without any external DID framework.
  */
 contract PillChain {
     // ──────────────────────────  Types  ──────────────────────────
@@ -20,6 +24,13 @@ contract PillChain {
         bool       exists;          // true once registered
     }
 
+    /// @notice On-chain identity record for a manufacturer.
+    struct Manufacturer {
+        string name;        // e.g. "Sun Pharma Ltd"
+        string licenseId;   // e.g. "MFG-IN-2024-001"
+        bool   isVerified;  // true when authorized by contract owner
+    }
+
     // ──────────────────────────  State  ──────────────────────────
 
     address public owner;
@@ -30,12 +41,12 @@ contract PillChain {
     /// ordered list of every registered batchId
     string[] private batchIds;
 
-    /// authorized manufacturer addresses
-    mapping(address => bool) public authorizedManufacturers;
+    /// address → Manufacturer identity (replaces plain bool mapping)
+    mapping(address => Manufacturer) public manufacturers;
 
     // ─────────────────────────  Events  ─────────────────────────
 
-    event ManufacturerAuthorized(address indexed manufacturer);
+    event ManufacturerAuthorized(address indexed manufacturer, string name, string licenseId);
     event ManufacturerRevoked(address indexed manufacturer);
     event BatchRegistered(
         string indexed batchId,
@@ -55,7 +66,7 @@ contract PillChain {
 
     modifier onlyAuthorized() {
         require(
-            authorizedManufacturers[msg.sender],
+            manufacturers[msg.sender].isVerified,
             "PillChain: caller is not an authorized manufacturer"
         );
         _;
@@ -70,29 +81,38 @@ contract PillChain {
     // ──────────────────────  Owner Functions  ───────────────────
 
     /**
-     * @notice Authorize an address to register drug batches.
-     * @param _manufacturer The address to authorize.
+     * @notice Authorize an address to register drug batches, recording their
+     *         real-world name and regulatory license ID on-chain.
+     * @param addr      The manufacturer wallet address.
+     * @param name      Human-readable company name.
+     * @param licenseId Regulatory / DID license identifier.
      */
-    function authorizeManufacturer(address _manufacturer) external onlyOwner {
-        require(
-            _manufacturer != address(0),
-            "PillChain: zero address not allowed"
-        );
-        authorizedManufacturers[_manufacturer] = true;
-        emit ManufacturerAuthorized(_manufacturer);
+    function authorizeManufacturer(
+        address addr,
+        string memory name,
+        string memory licenseId
+    ) external onlyOwner {
+        require(addr != address(0), "PillChain: zero address not allowed");
+        require(bytes(name).length > 0, "PillChain: name cannot be empty");
+        require(bytes(licenseId).length > 0, "PillChain: licenseId cannot be empty");
+
+        manufacturers[addr] = Manufacturer({
+            name:       name,
+            licenseId:  licenseId,
+            isVerified: true
+        });
+
+        emit ManufacturerAuthorized(addr, name, licenseId);
     }
 
     /**
      * @notice Revoke authorization from a manufacturer.
-     * @param _manufacturer The address to deauthorize.
+     * @param addr The address to deauthorize.
      */
-    function revokeManufacturer(address _manufacturer) external onlyOwner {
-        require(
-            _manufacturer != address(0),
-            "PillChain: zero address not allowed"
-        );
-        authorizedManufacturers[_manufacturer] = false;
-        emit ManufacturerRevoked(_manufacturer);
+    function revokeManufacturer(address addr) external onlyOwner {
+        require(addr != address(0), "PillChain: zero address not allowed");
+        manufacturers[addr].isVerified = false;
+        emit ManufacturerRevoked(addr);
     }
 
     /**
@@ -185,6 +205,26 @@ contract PillChain {
         isExpired   = block.timestamp > b.expiryDate;
         isRevoked   = b.isRevoked;
         batch       = b;
+    }
+
+    /**
+     * @notice Look up the DID identity of a manufacturer by wallet address.
+     * @param addr The manufacturer wallet address.
+     * @return name       Company name.
+     * @return licenseId  Regulatory license ID.
+     * @return isVerified Whether this address is currently authorized.
+     */
+    function getManufacturer(address addr)
+        external
+        view
+        returns (
+            string memory name,
+            string memory licenseId,
+            bool isVerified
+        )
+    {
+        Manufacturer memory m = manufacturers[addr];
+        return (m.name, m.licenseId, m.isVerified);
     }
 
     /**

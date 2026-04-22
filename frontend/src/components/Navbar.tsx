@@ -23,6 +23,16 @@ export default function Navbar() {
         <ul className={`navbar-links${menuOpen ? " open" : ""}`}>
           <li>
             <NavLink
+              to="/"
+              end
+              className={({ isActive }) => `navbar-link${isActive ? " active" : ""}`}
+              onClick={() => setMenuOpen(false)}
+            >
+              🏠 Home
+            </NavLink>
+          </li>
+          <li>
+            <NavLink
               to="/verify"
               className={({ isActive }) => `navbar-link${isActive ? " active" : ""}`}
               onClick={() => setMenuOpen(false)}

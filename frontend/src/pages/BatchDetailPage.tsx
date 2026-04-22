@@ -107,7 +107,23 @@ export default function BatchDetailPage() {
           </div>
           <div className="detail-item">
             <div className="detail-label">Manufacturer</div>
-            <div className="detail-value">{result.data.manufacturer || "—"}</div>
+            <div className="detail-value">
+              {result.data.manufacturerName ? (
+                <>
+                  {result.data.manufacturerName}
+                  {result.data.isVerified && (
+                    <span className="did-verified-badge">✓ Verified</span>
+                  )}
+                  {result.data.licenseId && (
+                    <div className="did-license-id" style={{ marginTop: 4 }}>
+                      License: {result.data.licenseId}
+                    </div>
+                  )}
+                </>
+              ) : (
+                result.data.manufacturer || "—"
+              )}
+            </div>
           </div>
           <div className="detail-item">
             <div className="detail-label">Expiry Date</div>

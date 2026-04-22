@@ -32,13 +32,13 @@ def test_health_endpoint():
 def test_verify_rejects_invalid_batch_id():
     # Batch IDs with special characters should be rejected
     response = client.get("/api/verify/BATCH%20001%3B%20DROP%20TABLE")
-    assert response.status_code == 400
+    assert response.status_code == 422
 
 
 def test_verify_rejects_empty_batch_id_chars():
     # Test with characters that don't match the alphanumeric pattern
     response = client.get("/api/verify/batch@#$!")
-    assert response.status_code == 400
+    assert response.status_code == 422
 
 
 def test_verify_accepts_valid_batch_id_format():

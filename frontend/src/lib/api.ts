@@ -12,6 +12,10 @@ export interface BatchData {
   registeredBy: string;
   isRevoked: boolean;
   exists: boolean;
+  // DID / manufacturer identity fields
+  manufacturerName?: string | null;
+  licenseId?: string | null;
+  isVerified?: boolean;
 }
 
 export interface VerifyResponse {

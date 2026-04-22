@@ -53,7 +53,21 @@ export default function BatchTable({ batches }: Props) {
               >
                 <td className="batch-id-cell">{batch.batchId}</td>
                 <td>{batch.drugName || "—"}</td>
-                <td>{batch.manufacturer || "—"}</td>
+                <td>
+                  {batch.manufacturerName ? (
+                    <span>
+                      {batch.manufacturerName}
+                      {batch.isVerified && (
+                        <span className="did-verified-badge">✓ Verified</span>
+                      )}
+                      {batch.licenseId && (
+                        <span className="did-license-id">License: {batch.licenseId}</span>
+                      )}
+                    </span>
+                  ) : (
+                    batch.manufacturer || "—"
+                  )}
+                </td>
                 <td>
                   {batch.expiryDate
                     ? new Date(batch.expiryDate * 1000).toLocaleDateString()

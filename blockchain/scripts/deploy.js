@@ -16,10 +16,14 @@ async function main() {
   const deployedAddress = await pillchain.getAddress();
   console.log("\n✅ PillChain deployed to:", deployedAddress);
 
-  // ── 2. Authorize manufacturer ──────────────────────────────
-  const authTx = await pillchain.authorizeManufacturer(manufacturer.address);
+  // ── 2. Authorize manufacturer (with DID identity) ───────────
+  const authTx = await pillchain.authorizeManufacturer(
+    manufacturer.address,
+    "Sun Pharma Ltd",
+    "MFG-IN-2024-001"
+  );
   await authTx.wait();
-  console.log("✅ Manufacturer authorized:", manufacturer.address);
+  console.log("✅ Manufacturer authorized:", manufacturer.address, "(Sun Pharma Ltd | MFG-IN-2024-001)");
 
   // ── 3. Seed test batches ───────────────────────────────────
   const ONE_YEAR = 365 * 24 * 60 * 60;
