@@ -7,6 +7,7 @@ module.exports = {
   networks: {
     localhost: {
       url: "http://127.0.0.1:8545",
+      chainId: 31337,    // Pin this so MetaMask never desyncs after Hardhat restart
     },
     amoy: {
       url: process.env.AMOY_RPC_URL || "",

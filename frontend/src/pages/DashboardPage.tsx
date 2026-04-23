@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { getAllBatches, getStats, type BatchData, type StatsResponse } from "../lib/api";
 import StatsCard from "../components/StatsCard";
 import BatchTable from "../components/BatchTable";
+import DAOPanel from "../components/DAOPanel";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<StatsResponse | null>(null);
@@ -91,6 +92,22 @@ export default function DashboardPage() {
       >
         <h2 style={{ fontSize: "1.25rem", marginBottom: 18 }}>Registered Batches</h2>
         <BatchTable batches={batches} />
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.3 }}
+      >
+        <div style={{ marginTop: 32, marginBottom: 0 }}>
+          <p className="section-eyebrow">Governance</p>
+          <h2 className="section-title" style={{ fontSize: "1.3rem", marginBottom: 4 }}>DAO Voting</h2>
+          <p className="section-subtitle" style={{ marginBottom: 0 }}>
+            Manufacturer authorization is controlled by a 5-member on-chain committee.
+            3 votes are required to approve a new manufacturer.
+          </p>
+        </div>
+        <DAOPanel />
       </motion.div>
     </div>
   );

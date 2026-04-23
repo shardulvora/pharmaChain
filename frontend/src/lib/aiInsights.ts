@@ -1,3 +1,10 @@
+// DEPRECATED — replaced by useAINarrative hook + Groq LLM backend (POST /api/ai-narrative)
+// This file is kept only to avoid breaking AIInsightsPanel.tsx during refactor.
+// Safe to delete once AIInsightsPanel.tsx is removed or updated.
+//
+// Remaining consumers (run: grep -r "aiInsights" frontend/src):
+//   frontend/src/components/AIInsightsPanel.tsx  ← line 4, import generateAIInsights
+
 import type { RiskScore } from "./riskScore";
 
 /* ── Types ─────────────────────────────────────────────────── */
@@ -294,7 +301,7 @@ export function generateAIInsights(
       id: "chain-complete",
       icon: "🔒",
       title: "Full Chain-of-Custody Verified",
-      detail: "All 4 supply chain checkpoints (Manufacturer → Distributor → Logistics → Pharmacy) recorded on-chain.",
+      detail: "All 4 supply chain stages (Manufacturer → Distributor → Logistics → Pharmacy) verified and consistent with registered batch provenance.",
       severity: "success",
     });
   } else if (status !== "FAKE" && status !== "COUNTERFEIT") {

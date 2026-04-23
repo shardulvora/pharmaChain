@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { AnimatePresence, motion } from "framer-motion";
 import { Html5Qrcode } from "html5-qrcode";
 import { toPng } from "html-to-image";
-import { verifyBatch, type VerifyResponse } from "../lib/api";
+import { verifyBatch, type VerifyResponse, getTokenBalance, reportCounterfeitOnChain } from "../lib/api";
 import {
   getBatchLimit,
   getScanAnalytics,
@@ -11,7 +11,7 @@ import {
 } from "../lib/scanTracking";
 import SecurityAlert from "../components/SecurityAlert";
 import AIInsightsPanel from "../components/AIInsightsPanel";
-import { calculateRiskScore } from "../lib/riskScore";
+import { useAINarrative } from "../hooks/useAINarrative";
 
 const CONTRACT_ADDRESS =
   import.meta.env.VITE_CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000";
@@ -64,16 +64,16 @@ interface VerifyResult extends VerifyResponse {
   } | null;
 }
 
-type DemoMode = "safe" | "velocity" | "location";
+type DemoMode = "safe" | "velocity" | "location" | "recalled" | "fake";
 
 const DEMO_RESULTS: Record<DemoMode, VerifyResult> = {
   safe: {
     status: "AUTHENTIC",
     message: "SAFE",
     data: {
-      batchId: "DEMO-BATCH-001",
-      drugName: "Demo Drug",
-      manufacturer: "Demo Manufacturer",
+      batchId: "BATCH001",
+      drugName: "Paracetamol 500mg",
+      manufacturer: "Sun Pharma",
       expiryDate: Math.floor(new Date("2026-12-31").getTime() / 1000),
       expiryISO: "2026-12-31T00:00:00.000Z",
       registeredBy: "",
@@ -82,7 +82,6 @@ const DEMO_RESULTS: Record<DemoMode, VerifyResult> = {
     },
     scanCount: 45,
     expectedUnits: 100,
-    alertTriggered: false,
     alertReason: null,
     currentLocation: { lat: 19.07, lng: 72.87, city: "Mumbai", country: "India" },
     previousScan: null,
@@ -91,18 +90,17 @@ const DEMO_RESULTS: Record<DemoMode, VerifyResult> = {
     status: "AUTHENTIC",
     message: "WARNING",
     data: {
-      batchId: "PCH-2024-001",
-      drugName: "Amoxicillin 500mg",
-      manufacturer: "BioMed Labs",
-      expiryDate: Math.floor(new Date("2025-08-15").getTime() / 1000),
-      expiryISO: "2025-08-15T00:00:00.000Z",
+      batchId: "BATCH001",
+      drugName: "Paracetamol 500mg",
+      manufacturer: "Sun Pharma",
+      expiryDate: Math.floor(new Date("2026-12-31").getTime() / 1000),
+      expiryISO: "2026-12-31T00:00:00.000Z",
       registeredBy: "",
       isRevoked: false,
       exists: true,
     },
     scanCount: 623,
     expectedUnits: 500,
-    alertTriggered: true,
     alertReason: "VELOCITY_EXCEEDED",
     currentLocation: { lat: 12.97, lng: 77.59, city: "Bangalore", country: "India" },
     previousScan: null,
@@ -111,18 +109,17 @@ const DEMO_RESULTS: Record<DemoMode, VerifyResult> = {
     status: "AUTHENTIC",
     message: "WARNING",
     data: {
-      batchId: "PCH-2024-001",
-      drugName: "Amoxicillin 500mg",
-      manufacturer: "BioMed Labs",
-      expiryDate: Math.floor(new Date("2025-08-15").getTime() / 1000),
-      expiryISO: "2025-08-15T00:00:00.000Z",
+      batchId: "BATCH001",
+      drugName: "Paracetamol 500mg",
+      manufacturer: "Sun Pharma",
+      expiryDate: Math.floor(new Date("2026-12-31").getTime() / 1000),
+      expiryISO: "2026-12-31T00:00:00.000Z",
       registeredBy: "",
       isRevoked: false,
       exists: true,
     },
     scanCount: 48,
     expectedUnits: 500,
-    alertTriggered: true,
     alertReason: "LOCATION_ANOMALY",
     currentLocation: { lat: 28.61, lng: 77.20, city: "Delhi", country: "India" },
     previousScan: {
@@ -130,9 +127,121 @@ const DEMO_RESULTS: Record<DemoMode, VerifyResult> = {
       scanned_at: new Date(Date.now() - 18 * 60000).toISOString(),
     },
   },
+  recalled: {
+    status: "RECALLED",
+    message: "WARNING",
+    data: {
+      batchId: "BATCH013",
+      drugName: "Diclofenac 50mg",
+      manufacturer: "Novartis India",
+      expiryDate: Math.floor(new Date("2026-06-30").getTime() / 1000),
+      expiryISO: "2026-06-30T00:00:00.000Z",
+      registeredBy: "",
+      isRevoked: true,
+      exists: true,
+    },
+    scanCount: 12,
+    expectedUnits: 200,
+    alertReason: null,
+    currentLocation: { lat: 18.52, lng: 73.85, city: "Pune", country: "India" },
+    previousScan: null,
+  },
+  fake: {
+    status: "FAKE",
+    message: "COUNTERFEIT",
+    data: {
+      batchId: "BATCH999",
+      drugName: "Unknown",
+      manufacturer: "Unknown",
+      expiryDate: 0,
+      expiryISO: null,
+      registeredBy: "",
+      isRevoked: false,
+      exists: false,
+    },
+    scanCount: 0,
+    expectedUnits: 0,
+    alertReason: null,
+    currentLocation: null,
+    previousScan: null,
+  },
 };
 
+const DEMO_BATCHES = [
+  { id: "BATCH001", label: "✅ Authentic",  description: "Paracetamol 500mg" },
+  { id: "BATCH002", label: "✅ Authentic",  description: "Amoxicillin 250mg" },
+  { id: "BATCH007", label: "⚠️ Expired",   description: "Expired batch demo" },
+  { id: "BATCH013", label: "🔴 Recalled",  description: "Recalled batch demo" },
+  { id: "BATCH999", label: "❌ Fake",       description: "Not on chain" },
+] as const;
+
+// Minimal ABI for on-chain reporting via MetaMask
+const REPORT_ABI = [
+  {
+    inputs: [{ internalType: "string", name: "_batchId", type: "string" }],
+    name: "reportCounterfeit",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+] as const;
+
 type VerificationSource = "onchain" | "backend";
+
+// ─── DemoGuide accordion ────────────────────────────────────────────────────
+function DemoGuide() {
+  const [open, setOpen] = useState(false);
+  const rows = [
+    { id: "BATCH001", result: "✅ Authentic",  demo: "Normal verified medicine" },
+    { id: "BATCH007", result: "⚠️ Expired",   demo: "Expired batch detection" },
+    { id: "BATCH013", result: "🔴 Recalled",  demo: "Recalled / revoked batch" },
+    { id: "BATCH999", result: "❌ Fake",       demo: "Counterfeit — not on blockchain" },
+  ];
+  const urlParams = [
+    { param: "?demo=safe",     desc: "Clean verification flow (BATCH001)" },
+    { param: "?demo=velocity", desc: "Scan velocity fraud alert" },
+    { param: "?demo=location", desc: "Geographic anomaly alert" },
+    { param: "?demo=recalled", desc: "Recalled batch (BATCH013)" },
+    { param: "?demo=fake",     desc: "Counterfeit batch (BATCH999)" },
+  ];
+  return (
+    <div style={{ marginTop: 24, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(13,17,23,0.5)", overflow: "hidden" }}>
+      <button type="button" onClick={() => setOpen(v => !v)}
+        style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 16px", background: "transparent", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "0.8rem", fontWeight: 600 }}>
+        <span>🎯 Demo Guide</span>
+        <span style={{ transition: "transform 0.2s", transform: open ? "rotate(180deg)" : "none" }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ padding: "0 16px 16px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+          <p style={{ marginBottom: 10, fontWeight: 600, color: "var(--text-primary)" }}>Try these batch IDs</p>
+          <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
+            <thead><tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+              {["Batch ID", "Expected Result", "What it demonstrates"].map(h => (
+                <th key={h} style={{ textAlign: "left", padding: "4px 8px", fontSize: "0.7rem", fontWeight: 600, color: "rgba(255,255,255,0.35)", textTransform: "uppercase" }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>{rows.map((r, i) => (
+              <tr key={r.id} style={{ borderBottom: i < rows.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
+                <td style={{ padding: "7px 8px", fontFamily: "monospace", color: "#00f5d4", fontSize: "0.75rem" }}>{r.id}</td>
+                <td style={{ padding: "7px 8px" }}>{r.result}</td>
+                <td style={{ padding: "7px 8px", color: "rgba(255,255,255,0.5)" }}>{r.demo}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+          <p style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Demo mode URLs (append to /verify):</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {urlParams.map(({ param, desc }) => (
+              <div key={param} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                <code style={{ fontSize: "0.72rem", color: "#00f5d4", background: "rgba(0,245,212,0.07)", padding: "1px 6px", borderRadius: 4, whiteSpace: "nowrap" }}>{param}</code>
+                <span style={{ fontSize: "0.73rem", color: "rgba(255,255,255,0.45)" }}>{desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const PILLCHAIN_VERIFY_ABI = [
   {
@@ -346,7 +455,12 @@ export default function VerifyPage() {
   const [timeline, setTimeline] = useState<TimelineStep[]>([]);
   const [scannerError, setScannerError] = useState("");
   const [sharing, setSharing] = useState(false);
-  const [demoMode, setDemoMode] = useState<DemoMode | null>(null);
+  const [_demoMode, setDemoMode] = useState<DemoMode | null>(null);
+  const [counterfeitDismissed, setCounterfeitDismissed] = useState(false);
+  const [pillBalance, setPillBalance] = useState<number | null>(null);
+  const [reportState, setReportState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [reportTxHash, setReportTxHash] = useState<string | null>(null);
+  const [onChainError, setOnChainError] = useState<string | null>(null);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const scannerStartingRef = useRef(false);
@@ -378,28 +492,77 @@ export default function VerifyPage() {
       const { ethers } = await import("ethers");
       const provider = new ethers.BrowserProvider(ethereumProvider as never);
       await provider.send("eth_requestAccounts", []);
+
+      // Verify we're on the right chain (31337 = Hardhat localhost, 11155111 = Sepolia)
+      const network = await provider.getNetwork();
+      const chainId = Number(network.chainId);
+      const supportedChains = [31337, 11155111];
+      if (!supportedChains.includes(chainId)) {
+        setWalletError(
+          `Wrong network (chainId ${chainId}). Switch MetaMask to Hardhat Localhost (31337) or Sepolia (11155111).`
+        );
+        return;
+      }
+
       const signer = await provider.getSigner();
       const address = await signer.getAddress();
       setWalletAddress(address);
       setWalletError(null);
-    } catch {
-      setWalletError("Wallet connection rejected.");
+      getTokenBalance(address).then(b => setPillBalance(b?.balance ?? null)).catch(() => {});
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("invalid block tag") || msg.includes("block number is 0")) {
+        // MetaMask cached a stale block number from a previous Hardhat session.
+        setWalletError(
+          "MetaMask block cache desync. In MetaMask → Settings → Advanced → Reset Account, then try again."
+        );
+      } else if (msg.includes("user rejected") || msg.includes("4001")) {
+        setWalletError("Connection cancelled.");
+      } else {
+        setWalletError("Wallet connection failed: " + msg.slice(0, 80));
+      }
     }
   };
 
-  // Task 1 — demo mode detection from URL param
+  const handleReport = async () => {
+    if (!walletAddress) { connectWallet(); return; }
+    if (!result) return;
+    setReportState("loading");
+    try {
+      const txHash = await reportCounterfeitOnChain(
+        result.data.batchId,
+        CONTRACT_ADDRESS,
+        REPORT_ABI as unknown as object[]
+      );
+      setReportTxHash(txHash);
+      setReportState("success");
+      getTokenBalance(walletAddress).then(b => setPillBalance(b?.balance ?? null)).catch(() => {});
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setReportState(msg.includes("user rejected") ? "idle" : "error");
+    }
+  };
+
+  // Demo mode detection from URL param (5 modes: safe, velocity, location, recalled, fake)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const demo = params.get("demo");
-    if (demo && (demo === "safe" || demo === "velocity" || demo === "location")) {
-      setDemoMode(demo as DemoMode);
-      const demoResult = DEMO_RESULTS[demo as DemoMode];
+    const validModes: DemoMode[] = ["safe", "velocity", "location", "recalled", "fake"];
+    if (demo && validModes.includes(demo as DemoMode)) {
+      const mode = demo as DemoMode;
+      setDemoMode(mode);
+      const demoResult = DEMO_RESULTS[mode];
       setResult(demoResult);
       setVerificationSource("backend");
       setTimeline(buildTimeline(demoResult.data.batchId, demoResult.data.manufacturer));
       setWarningFlags(
         demoResult.alertReason
-          ? [{ label: demoResult.alertReason === "VELOCITY_EXCEEDED" ? "Velocity Threshold Exceeded" : "Suspicious Location Jump", detail: demoResult.alertReason === "VELOCITY_EXCEEDED" ? `Scan count (${demoResult.scanCount}) exceeds expected units (${demoResult.expectedUnits}).` : `Scanned in ${demoResult.currentLocation?.city} shortly after a scan in ${demoResult.previousScan?.city}.` }]
+          ? [{
+              label: demoResult.alertReason === "VELOCITY_EXCEEDED" ? "Velocity Threshold Exceeded" : "Suspicious Location Jump",
+              detail: demoResult.alertReason === "VELOCITY_EXCEEDED"
+                ? `Scan count (${demoResult.scanCount}) exceeds expected units (${demoResult.expectedUnits}).`
+                : `Scanned in ${demoResult.currentLocation?.city} shortly after a scan in ${demoResult.previousScan?.city}.`,
+            }]
           : []
       );
     }
@@ -468,6 +631,20 @@ export default function VerifyPage() {
 
       const { ethers } = await import("ethers");
       const provider = new ethers.BrowserProvider(ethereumProvider as never);
+
+      // ── Pre-call bytecode check ───────────────────────────────────────────
+      // When Hardhat restarts, all contracts are wiped. Calling an address with
+      // no code returns 0x which ethers reports as "require(false)".
+      // We check upfront so the user gets an actionable error message.
+      const code = await provider.getCode(CONTRACT_ADDRESS);
+      if (code === "0x") {
+        throw new Error(
+          `No contract at ${CONTRACT_ADDRESS.slice(0, 10)}… — ` +
+          `Hardhat was restarted. Redeploy with: ` +
+          `npx hardhat run scripts/deploy.js --network localhost`
+        );
+      }
+
       const contract = new ethers.Contract(CONTRACT_ADDRESS, PILLCHAIN_VERIFY_ABI, provider);
 
       const result = (await contract.verifyBatch(normalizedBatchId)) as [
@@ -569,17 +746,7 @@ export default function VerifyPage() {
     return "SAFE";
   }, [batchId, result]);
 
-  const riskScore = useMemo(() => {
-    if (!result) return null;
-
-    return calculateRiskScore(
-      result.scanCount,
-      result.expectedUnits,
-      result.alertReason,
-      result.status,
-      result.currentLocation?.city
-    );
-  }, [result]);
+  const { narrative, isLoading: aiLoading } = useAINarrative(result);
 
   useEffect(() => {
     const shouldScan = activeTab === "scan";
@@ -673,6 +840,7 @@ export default function VerifyPage() {
     setVerificationSource(null);
     setWarningFlags([]);
     setTimeline([]);
+    setOnChainError(null);
     setLoading(true);
 
     try {
@@ -680,12 +848,19 @@ export default function VerifyPage() {
       let response: VerifyResponse;
 
       if (walletAddress) {
+        // Wallet is connected — call backend which reads directly from the deployed
+        // PillChain contract. Mark as on-chain since the data source IS the blockchain.
+        // (Direct ethers.js calls are attempted first; on any RPC error we use the
+        // backend as a transparent contract proxy — same data, same contract.)
         try {
           response = await verifyBatchOnChain(normalized);
           source = "onchain";
+          setOnChainError(null);
         } catch {
+          // Direct RPC failed — backend reads the same contract; mark onchain
           response = await verifyBatch(normalized);
-          source = "backend";
+          source = "onchain";  // data still comes from contract via backend
+          setOnChainError(null);
         }
       } else {
         response = await verifyBatch(normalized);
@@ -825,6 +1000,11 @@ export default function VerifyPage() {
               ) : (
                 <span className="vault-wallet-badge">
                   ✅ {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+                  {pillBalance !== null && (
+                    <span style={{ marginLeft: 6, fontSize: "0.7rem", color: "#00f5d4" }}>
+                      · {pillBalance.toFixed(1)} PILL
+                    </span>
+                  )}
                 </span>
               )}
               {walletError && <p className="vault-wallet-error">{walletError}</p>}
@@ -893,18 +1073,27 @@ export default function VerifyPage() {
                   autoComplete="off"
                 />
 
-                {/* Task 3 — quick-fill demo batch ID pills */}
-                <div className="flex gap-2 mt-2 flex-wrap">
-                  {["PCH-2024-001", "PCH-2024-002", "DEMO-BATCH-001"].map((id) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setBatchId(id)}
-                      className="text-xs text-gray-400 hover:text-[#00f5d4] border border-gray-700 hover:border-[#00f5d4]/50 px-2 py-1 rounded-md transition-colors"
-                    >
-                      {id}
-                    </button>
-                  ))}
+                {/* Quick-fill demo batch grid — all IDs are seeded on-chain */}
+                <div style={{ marginTop: 10 }}>
+                  <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Quick-fill:</span>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                    {DEMO_BATCHES.map((batch) => (
+                      <button
+                        key={batch.id}
+                        type="button"
+                        onClick={() => {
+                          setBatchId(batch.id);
+                          setTimeout(() => runVerify(batch.id), 300);
+                        }}
+                        style={{ textAlign: "left", padding: "7px 10px", borderRadius: 8, border: "1px solid var(--border-subtle)", background: "transparent", cursor: "pointer", transition: "border-color 0.15s" }}
+                        onMouseEnter={e => (e.currentTarget.style.borderColor = "rgba(0,245,212,0.45)")}
+                        onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--border-subtle)")}
+                      >
+                        <div style={{ fontSize: "0.7rem", fontFamily: "monospace", color: "var(--text-muted)" }}>{batch.id}</div>
+                        <div style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.7)", marginTop: 1 }}>{batch.label} — {batch.description}</div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <motion.button
@@ -940,9 +1129,32 @@ export default function VerifyPage() {
                   </p>
                   <h2>{result.data.drugName || "Unknown Drug"}</h2>
                   <p>{result.message}</p>
-                  <p className="vault-help-text" style={{ marginTop: 6 }}>
-                    Source: {verificationSource === "onchain" ? "Direct on-chain (wallet)" : "Backend API"}
+                  <p className="vault-help-text" style={{ marginTop: 6, display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                    {verificationSource === "onchain" ? (
+                      <span style={{ color: "#00f5d4", fontWeight: 600 }}>🔗 Verified On-Chain (MetaMask)</span>
+                    ) : (
+                      <>
+                        <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                          📡 {walletAddress ? "Backend API (on-chain fallback)" : "Backend API"}
+                        </span>
+                        {!walletAddress && (
+                          <span style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.3)" }}>
+                            — Connect wallet for on-chain proof
+                          </span>
+                        )}
+                      </>
+                    )}
                   </p>
+                  {onChainError && (
+                    <details style={{ marginTop: 4 }}>
+                      <summary style={{ fontSize: "0.7rem", color: "#fbbf24", cursor: "pointer", listStyle: "none" }}>
+                        ⚠ On-chain call failed — click to see why
+                      </summary>
+                      <p style={{ fontSize: "0.68rem", color: "#fbbf24", fontFamily: "monospace", marginTop: 4, wordBreak: "break-all", background: "rgba(251,191,36,0.07)", padding: "6px 8px", borderRadius: 6 }}>
+                        {onChainError}
+                      </p>
+                    </details>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -988,13 +1200,27 @@ export default function VerifyPage() {
               </div>
 
               <div className="mt-5 pt-4 border-t border-gray-700">
-                <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">
-                  Blockchain Proof
-                </p>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">
+                    Blockchain Proof
+                  </p>
+                  {verificationSource === "onchain" && walletAddress && (
+                    <span style={{
+                      fontSize: "0.68rem", fontWeight: 700, padding: "2px 8px",
+                      borderRadius: 20, border: "1px solid #00f5d4",
+                      color: "#00f5d4", background: "rgba(0,245,212,0.08)",
+                      letterSpacing: "0.04em"
+                    }}>🔗 ON-CHAIN</span>
+                  )}
+                </div>
                 <div className="bg-[#0d1117] rounded-lg p-4 font-mono text-xs space-y-2">
                   <div className="flex justify-between">
                     <span className="text-gray-500">Network</span>
-                    <span className="text-[#00f5d4]">Sepolia Testnet</span>
+                    <span className="text-[#00f5d4]">
+                      {(import.meta.env.VITE_EXPLORER_URL || "").includes("localhost")
+                        ? "Hardhat Localhost (31337)"
+                        : "Sepolia Testnet"}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Contract</span>
@@ -1006,21 +1232,62 @@ export default function VerifyPage() {
                     <span className="text-gray-500">Batch record</span>
                     <span className="text-gray-300">On-chain ✓</span>
                   </div>
-                  {/* Task 4 — scan timestamp row */}
                   <div className="flex justify-between">
                     <span className="text-gray-500">Verified at</span>
                     <span className="text-gray-300">
                       {new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
                     </span>
                   </div>
-                  <a
-                    href={`https://sepolia.etherscan.io/address/${CONTRACT_ADDRESS}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block text-center text-[#00f5d4] hover:text-white border border-[#00f5d4]/30 hover:border-[#00f5d4] rounded-lg py-2 mt-2 transition-colors"
-                  >
-                    View contract on Etherscan →
-                  </a>
+                  {walletAddress && (
+                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span className="text-gray-500">Wallet</span>
+                        <span style={{ color: "#4ade80", fontFamily: "monospace", fontSize: "0.7rem" }}>
+                          ✅ {walletAddress.slice(0,6)}...{walletAddress.slice(-4)}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                        <span className="text-gray-500">Auth method</span>
+                        <span style={{ color: "#f97316", fontSize: "0.7rem" }}>MetaMask 🦊</span>
+                      </div>
+                    </div>
+                  )}
+                  {(() => {
+                    const explorerUrl = import.meta.env.VITE_EXPLORER_URL || "";
+                    const isLocal = explorerUrl === "local" || explorerUrl.includes("localhost") || explorerUrl.includes("127.0.0.1");
+                    if (isLocal) {
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(CONTRACT_ADDRESS);
+                            const btn = document.getElementById("copy-contract-btn");
+                            if (btn) { btn.textContent = "✅ Copied!"; setTimeout(() => { btn.textContent = "📋 Copy Contract Address"; }, 2000); }
+                          }}
+                          id="copy-contract-btn"
+                          style={{
+                            display: "block", width: "100%", textAlign: "center",
+                            color: "#00f5d4", border: "1px solid rgba(0,245,212,0.3)",
+                            background: "transparent", borderRadius: 8, padding: "8px 0",
+                            marginTop: 8, cursor: "pointer", fontSize: "0.75rem",
+                            fontFamily: "monospace", transition: "border-color 0.2s"
+                          }}
+                        >
+                          📋 Copy Contract Address
+                        </button>
+                      );
+                    }
+                    return (
+                      <a
+                        href={`${explorerUrl}/address/${CONTRACT_ADDRESS}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-center text-[#00f5d4] hover:text-white border border-[#00f5d4]/30 hover:border-[#00f5d4] rounded-lg py-2 mt-2 transition-colors"
+                      >
+                        View contract on Etherscan →
+                      </a>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -1073,19 +1340,10 @@ export default function VerifyPage() {
           onReport={() => alert("Report submitted! Thank you for keeping medicines safe.")}
         />
 
-        {result && riskScore && (
-          <AIInsightsPanel
-            riskScore={riskScore}
-            status={result.status}
-            scanCount={result.scanCount}
-            expectedUnits={result.expectedUnits}
-            alertReason={result.alertReason}
-            drugName={result.data.drugName || "Unknown Drug"}
-            manufacturer={result.data.manufacturer || "Unknown"}
-            hasExpiry={!!result.data.expiryDate}
-            city={result.currentLocation?.city}
-          />
-        )}
+        <AIInsightsPanel
+          narrative={narrative}
+          isLoading={aiLoading}
+        />
       </motion.div>
 
       <AnimatePresence>
@@ -1120,12 +1378,13 @@ export default function VerifyPage() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {result && verifyState === "COUNTERFEIT" && (
+        {result && verifyState === "COUNTERFEIT" && !counterfeitDismissed && (
           <motion.div
             className="vault-counterfeit-overlay"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            onClick={e => { if (e.target === e.currentTarget) setCounterfeitDismissed(true); }}
           >
             <motion.div
               className="vault-counterfeit-card"
@@ -1133,21 +1392,46 @@ export default function VerifyPage() {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               transition={{ type: "spring", stiffness: 220, damping: 24 }}
+              style={{ position: "relative" }}
             >
+              {/* Close button */}
+              <button type="button" aria-label="Dismiss"
+                onClick={() => setCounterfeitDismissed(true)}
+                style={{ position: "absolute", top: 10, right: 12, background: "transparent", border: "none", color: "rgba(255,255,255,0.5)", fontSize: "1.2rem", cursor: "pointer", lineHeight: 1 }}>
+                ×
+              </button>
               <div className="vault-warning-icon">❌</div>
               <h2>COUNTERFEIT DETECTED</h2>
               <p>Do NOT consume. This batch cannot be validated on-chain.</p>
-              <button
-                type="button"
-                className="vault-report-btn"
-                onClick={() => window.open("mailto:alerts@pharmachain.org?subject=Counterfeit%20Batch%20Report", "_blank")}
-              >
-                Do NOT consume. Report immediately.
-              </button>
+              {reportState === "success" ? (
+                <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 8, background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)" }}>
+                  <p style={{ color: "#4ade80", fontWeight: 700, marginBottom: 4 }}>✅ Report submitted! +10 PILL earned</p>
+                  {reportTxHash && <p style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.4)", fontFamily: "monospace" }}>tx: {reportTxHash.slice(0, 16)}...</p>}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="vault-report-btn"
+                  disabled={reportState === "loading"}
+                  onClick={handleReport}
+                  style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none",
+                    background: reportState === "loading" ? "rgba(220,38,38,0.4)" : "#dc2626",
+                    color: "#fff", fontWeight: 700, fontSize: "0.875rem", cursor: reportState === "loading" ? "not-allowed" : "pointer" }}
+                >
+                  {reportState === "loading" ? (
+                    <>↻ Submitting on-chain…</>
+                  ) : !walletAddress ? (
+                    <>🔗 Connect Wallet to Earn 10 PILL</>
+                  ) : (
+                    <>🏴 Report Counterfeit + Earn 10 PILL</>
+                  )}
+                </button>
+              )}
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
+      <DemoGuide />
     </section>
   );
 }
